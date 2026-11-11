@@ -1,0 +1,63 @@
+name: build-wda
+
+# 鍦?GitHub 鐨?macOS runner 涓婄紪璇?WebDriverAgent锛屼骇鍑哄彲鐩存帴 sideload 鐨?ipa銆?# Windows 涓婃病鏈?Xcode锛岃繖鏄厤 Mac 鎷垮埌 WDA 鐨勫敮涓€骞插噣璺緞銆?
+on:
+  workflow_dispatch:      # 鎵嬪姩鐐?Run workflow
+  push:
+    branches: [main, master]
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 鐜鑷锛圶code 鐗堟湰鍐冲畾鑳戒笉鑳芥敮鎸佷綘鐨?iOS锛?        run: |
+          echo "=== Xcode ==="
+          xcodebuild -version || true
+          ls /Applications | grep -i xcode || true
+          echo "=== 鎵€鏈夊彲鐢?SDK ==="
+          xcodebuild -showsdks | grep -i ios || true
+          echo "=== 鍙敤妯℃嫙鍣?runtime ==="
+          xcrun simctl list runtimes 2>/dev/null | head -20 || true
+
+      - name: 缂栬瘧 WebDriverAgentRunner锛堜笉绛惧悕锛岀鍚嶄氦缁?sideloadly锛?        run: |
+          set -o pipefail
+          xcodebuild build-for-testing \
+            -project WebDriverAgent.xcodeproj \
+            -scheme WebDriverAgentRunner \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath ./out \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            2>&1 | tail -40
+
+      - name: 鎵撳寘鎴?ipa
+        run: |
+          set -e
+          APP=$(find ./out/Build/Products -name "WebDriverAgentRunner-Runner.app" -maxdepth 3 | head -1)
+          if [ -z "$APP" ]; then
+            echo "::error::娌℃壘鍒?WebDriverAgentRunner-Runner.app锛屾鏌ヤ笂闈㈢殑缂栬瘧鏃ュ織"
+            find ./out/Build/Products -maxdepth 3 -name "*.app" || true
+            exit 1
+          fi
+          echo "APP=$APP"
+          mkdir -p Payload
+          cp -R "$APP" Payload/
+          zip -qry WebDriverAgentRunner.ipa Payload
+          ls -lh WebDriverAgentRunner.ipa
+          # 椤烘墜鎶?xctestrun 涔熷甫涓婏細tidevice 鍙互鐩存帴鐢ㄥ畠璺?WDA锛屼笉蹇呭厛瑁?app
+          find ./out/Build/Products -name "*.xctestrun" -exec cp {} . \;
+          ls -lh *.xctestrun || true
+
+      - name: 涓婁紶浜х墿
+        uses: actions/upload-artifact@v4
+        with:
+          name: WDA
+          path: |
+            WebDriverAgentRunner.ipa
+            *.xctestrun
+          if-no-files-found: error
